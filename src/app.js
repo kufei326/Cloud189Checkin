@@ -57,22 +57,15 @@ const doTask = async (cloudClient) => {
 
 const doFamilyTask = async (cloudClient) => {
   const { familyInfoResp } = await cloudClient.getFamilyList();
-  const familyResult = [];
   let totalBonusSpace = 0; // 用于统计所有家庭任务的 bonusSpace
   if (familyInfoResp) {
     for (let index = 0; index < familyInfoResp.length; index += 1) {
       const { familyId } = familyInfoResp[index];
       const res = await cloudClient.familyUserSign('108981821788983');
       totalBonusSpace += res.bonusSpace || 0; // 累加 bonusSpace
-      familyResult.push(
-        "家庭任务" +
-          `${res.signStatus ? "已经签到过了，" : ""}签到获得${
-            res.bonusSpace
-          }M空间`
-      );
     }
   }
-  return { familyResult, totalBonusSpace }; // 返回结果和总 bonusSpace
+  return totalBonusSpace; // 返回总 bonusSpace
 };
 
 const pushServerChan = (title, desp) => {
@@ -224,10 +217,8 @@ async function main() {
            result.forEach((r) => logger.log(r));
            
            // 执行家庭任务并获取 bonusSpace
-           const { familyResult, totalBonusSpace } =
-             await doFamilyTask(cloudClient);
+           const totalBonusSpace = await doFamilyTask(cloudClient);
            totalBonusSpaceAllAccounts += totalBonusSpace; // 累加当前账号的总 bonusSpace
-           familyResult.forEach((r) => logger.log(r));
 
            logger.log("任务执行完毕");
            const { cloudCapacityInfo, familyCapacityInfo } =
