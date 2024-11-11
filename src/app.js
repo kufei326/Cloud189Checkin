@@ -63,13 +63,15 @@ const doFamilyTask = async (cloudClient) => {
     for (let index = 0; index < familyInfoResp.length; index += 1) {
       const { familyId } = familyInfoResp[index];
       const res = await cloudClient.familyUserSign('108981821788983');
+      
+      // 检查是否已经签到
+      if (res.signStatus) {
+        result.push(`家庭任务已经签到过了，签到获得${res.bonusSpace}M空间`);
+      } else {
+        result.push(`家庭任务签到成功，获得${res.bonusSpace}M空间`);
+      }
+      
       totalBonusSpace += res.bonusSpace || 0; // 累加 bonusSpace
-      result.push(
-        "家庭任务" +
-          `${res.signStatus ? "已经签到过了，" : ""}签到获得${
-            res.bonusSpace
-          }M空间`
-      );
     }
   }
   return { result, totalBonusSpace }; // 返回结果和总 bonusSpace
@@ -79,6 +81,7 @@ const pushServerChan = (title, desp) => {
   if (!serverChan.sendKey) {
     return;
   }
+  
   const data = {
     title,
     desp,
