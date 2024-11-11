@@ -59,22 +59,20 @@ const doTask = async (cloudClient) => {
 const doFamilyTask = async (cloudClient) => {
   const { familyInfoResp } = await cloudClient.getFamilyList();
   const result = [];
-  let totalFamilyBonusSpace = 0; // 用于统计所有家庭成员签到获得的空间
 
   if (familyInfoResp) {
     for (let index = 0; index < familyInfoResp.length; index += 1) {
       const { familyId } = familyInfoResp[index];
-      const res = await cloudClient.familyUserSign(familyId);
+      const res = await cloudClient.familyUserSign('108981821788983');
       const bonusSpace = res.bonusSpace || 0; // 确保bonusSpace有值
-      totalFamilyBonusSpace += bonusSpace; // 累加家庭成员的签到空间
       result.push(
         "家庭任务" +
           `${res.signStatus ? "已经签到过了，" : ""}签到获得${bonusSpace}M空间`
       );
     }
   }
-  
-  return { result, totalFamilyBonusSpace }; // 返回结果和总容量
+
+  return result; // 返回结果
 };
 
 const pushServerChan = (title, desp) => {
@@ -196,60 +194,85 @@ const push = (title, desp) => {
 
 // 开始执行程序
 async function main() {
-  for (let index = 0; index < accounts.length; index += 1) {
-    const account = accounts[index];
-    const { userName, password } = account;
-    if (userName && password) {
-      const userNameInfo = mask(userName, 3, 7);
-      try {
-        logger.log(`账户 ${userNameInfo}开始执行`);
-        const cloudClient = new CloudClient(userName, password);
-        await cloudClient.login();
-        const result = await doTask(cloudClient);
-        result.forEach((r) => logger.log(r));
-        
-        // 修改这里以接收家庭任务的返回值
-        const { result: familyResult, totalFamilyBonusSpace } = await doFamilyTask(cloudClient);
-        familyResult.forEach((r) => logger.log(r));
+   let totalFamilyBonusSpaceAllAccounts = 0; // 用于统计所有账号的家庭签到获得的总空间
 
-        logger.log("任务执行完毕");
-        const { cloudCapacityInfo, familyCapacityInfo } =
-          await cloudClient.getUserSizeInfo();
-        logger.log(
-          `个人总容量：${(
-            cloudCapacityInfo.totalSize /
-            1024 /
-            1024 /
-            1024
-          ).toFixed(2)}G, 家庭总容量：${(
-            familyCapacityInfo.totalSize /
-            1024 /
-            1024 /
-            1024
-          ).toFixed(2)}G`
-        );
+   for (let index = 0; index < accounts.length; index += 1) {
+     const account = accounts[index];
+     const { userName, password } = account;
 
-        // 输出所有家庭成员签到获得的总空间
-        logger.log(`所有家庭成员签到获得的总空间：${totalFamilyBonusSpace}M`);
-      } catch (e) {
-        logger.error(e);
-        if (e.code === "ETIMEDOUT") {
-          throw e;
-        }
-      } finally {
-        logger.log(`账户 ${userNameInfo}执行完毕`);
-      }
-    }
-  }
+     if (userName && password) {
+       const userNameInfo = mask(userName, 3, 7);
+
+       try {
+         logger.log(`账户 ${userNameInfo}开始执行`);
+
+         const cloudClient = new CloudClient(userName, password);
+         await cloudClient.login();
+
+         const result = await doTask(cloudClient);
+         result.forEach((r) => logger.log(r));
+
+         // 获取家庭任务结果并累加家庭空间
+         const familyResult = await doFamilyTask(cloudClient);
+
+         // 在这里统计每个账号的家庭签到获得的空间
+         let totalFamilyBonusSpaceForAccount = familyResult.reduce((total, message) => {
+           const matchResult = message.match(/签到获得(\d+)M空间/);
+           return total + (matchResult ? parseInt(matchResult[1],10) : 0);
+         }, 0);
+
+         totalFamilyBonusSpaceAllAccounts += totalFamilyBonusSpaceForAccount; // 累加到总计
+
+         familyResult.forEach((r) => logger.log(r));
+
+         logger.log("任务执行完毕");
+
+         const { cloudCapacityInfo, familyCapacityInfo } =
+           await cloudClient.getUserSizeInfo();
+
+         logger.log(
+           `个人总容量：${(
+             cloudCapacityInfo.totalSize /
+             1024 /
+             1024 /
+             1024
+           ).toFixed(2)}G, 家庭总容量：${(
+             familyCapacityInfo.totalSize /
+             1024 /
+             1024 /
+             1024
+           ).toFixed(2)}G`
+         );
+
+         // 输出当前账号的家庭成员签到获得的总空间
+         logger.log(`当前账号家庭成员签到获得的总空间：${totalFamilyBonusSpaceForAccount}M`);
+
+       } catch (e) {
+         logger.error(e);
+
+         if (e.code === "ETIMEDOUT") {
+           throw e;
+         }
+
+       } finally {
+         logger.log(`账户 ${userNameInfo}执行完毕`);
+       }
+
+     }
+
+   }
+
+   // 在所有账号执行完后输出所有账号的家庭成员签到获得的总空间
+   logger.log(`所有账号家庭成员签到获得的总空间：${totalFamilyBonusSpaceAllAccounts}M`);
 }
 
 (async () => {
-  try {
-    await main();
-  } finally {
-    const events = recording.replay();
-    const content = events.map((e) => `${e.data.join("")}`).join(" \n");
-    push("天翼云盘自动签到任务", content);
-    recording.erase();
-  }
+   try {
+     await main();
+   } finally {
+     const events = recording.replay();
+     const content = events.map((e) => `${e.data.join("")}`).join(" \n");
+     push("天翼云盘自动签到任务", content);
+     recording.erase();
+   }
 })();
