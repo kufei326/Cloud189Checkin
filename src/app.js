@@ -2,21 +2,20 @@
 require("dotenv").config();
 const log4js = require("log4js");
 const recording = require("log4js/lib/appenders/recording");
-
-// 只配置一个 recording appender
 log4js.configure({
   appenders: {
-    vcr: { type: "recording" }
+    vcr: {
+      type: "recording",
+    },
+    out: {
+      type: "console",
+    },
   },
-  categories: { 
-    default: { 
-      appenders: ["vcr"], 
-      level: "info" 
-    } 
-  },
+  categories: { default: { appenders: ["vcr", "out"], level: "info" } },
 });
 
 const logger = log4js.getLogger();
+// process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0'
 const superagent = require("superagent");
 const { CloudClient } = require("cloud189-sdk");
 const serverChan = require("./push/serverChan");
@@ -38,18 +37,19 @@ const buildTaskResult = (res, result) => {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// 任务 1.签到 2.天天抽红包 3.自动备份抽红包
 const doTask = async (cloudClient) => {
   const result = [];
   const res1 = await cloudClient.userSign();
   result.push(
     `${res1.isSign ? "已经签到过了，" : ""}签到获得${res1.netdiskBonus}M空间`
   );
-  await delay(5000);
+  await delay(5000); // 延迟5秒
 
   const res2 = await cloudClient.taskSign();
   buildTaskResult(res2, result);
 
-  await delay(5000);
+  await delay(5000); // 延迟5秒
   const res3 = await cloudClient.taskPhoto();
   buildTaskResult(res3, result);
 
@@ -59,33 +59,29 @@ const doTask = async (cloudClient) => {
 const doFamilyTask = async (cloudClient) => {
   const { familyInfoResp } = await cloudClient.getFamilyList();
   const result = [];
-  let totalBonusSpace = 0;
-  const targetFamilyId = '108981821788983';
-  
   if (familyInfoResp) {
     for (let index = 0; index < familyInfoResp.length; index += 1) {
-      const res = await cloudClient.familyUserSign(targetFamilyId);
-      const bonusSpace = Number(res.bonusSpace) || 0;
-      totalBonusSpace += bonusSpace;
-      
-      if (bonusSpace > 0) {
-        result.push(`家庭任务签到获得${bonusSpace}M空间`);
-      }
+      const { familyId } = familyInfoResp[index];
+      const res = await cloudClient.familyUserSign('108981821788983');
+      result.push(
+        "家庭任务" +
+          `${res.signStatus ? "已经签到过了，" : ""}签到获得${
+            res.bonusSpace
+          }M空间`
+      );
     }
   }
-
-  return { 
-    result, 
-    totalBonusSpace,
-    summary: totalBonusSpace > 0 ? `共获得${totalBonusSpace}M空间` : '未获得新的空间'
-  };
+  return result;
 };
 
-// 推送相关函数保持不变...
 const pushServerChan = (title, desp) => {
-  if (!serverChan.sendKey) return;
-  const data = { title, desp };
-  
+  if (!serverChan.sendKey) {
+    return;
+  }
+  const data = {
+    title,
+    desp,
+  };
   superagent
     .post(`https://sctapi.ftqq.com/${serverChan.sendKey}.send`)
     .type("form")
@@ -105,13 +101,13 @@ const pushServerChan = (title, desp) => {
 };
 
 const pushTelegramBot = (title, desp) => {
-  if (!(telegramBot.botToken && telegramBot.chatId)) return;
-  
+  if (!(telegramBot.botToken && telegramBot.chatId)) {
+    return;
+  }
   const data = {
     chat_id: telegramBot.chatId,
     text: `${title}\n\n${desp}`,
   };
-  
   superagent
     .post(`https://api.telegram.org/bot${telegramBot.botToken}/sendMessage`)
     .type("form")
@@ -131,8 +127,9 @@ const pushTelegramBot = (title, desp) => {
 };
 
 const pushWecomBot = (title, desp) => {
-  if (!(wecomBot.key && wecomBot.telphone)) return;
-  
+  if (!(wecomBot.key && wecomBot.telphone)) {
+    return;
+  }
   const data = {
     msgtype: "text",
     text: {
@@ -140,9 +137,10 @@ const pushWecomBot = (title, desp) => {
       mentioned_mobile_list: [wecomBot.telphone],
     },
   };
-  
   superagent
-    .post(`https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${wecomBot.key}`)
+    .post(
+      `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${wecomBot.key}`
+    )
     .send(data)
     .end((err, res) => {
       if (err) {
@@ -159,8 +157,9 @@ const pushWecomBot = (title, desp) => {
 };
 
 const pushWxPusher = (title, desp) => {
-  if (!(wxpush.appToken && wxpush.uid)) return;
-  
+  if (!(wxpush.appToken && wxpush.uid)) {
+    return;
+  }
   const data = {
     appToken: wxpush.appToken,
     contentType: 1,
@@ -168,7 +167,6 @@ const pushWxPusher = (title, desp) => {
     content: desp,
     uids: [wxpush.uid],
   };
-  
   superagent
     .post("https://wxpusher.zjiecode.com/api/send/message")
     .send(data)
@@ -193,68 +191,55 @@ const push = (title, desp) => {
   pushWxPusher(title, desp);
 };
 
-// 主函数优化
+// 开始执行程序
 async function main() {
-  let totalBonusSpaceAllAccounts = 0;
-  const maxConcurrency = 5;
-  const tasksQueue = [...accounts];
-
-  while (tasksQueue.length > 0) {
-    const currentTasks = tasksQueue.splice(0, maxConcurrency);
-
-    await Promise.all(currentTasks.map(async account => {
-      const { userName, password } = account;
-      if (userName && password) {
-        const userNameInfo = mask(userName, 3, 7);
-        try {
-          logger.info(`账户 ${userNameInfo} 开始执行`);
-          const cloudClient = new CloudClient(userName, password);
-          await cloudClient.login();
-          
-          // 执行常规任务
-          const result = await doTask(cloudClient);
-          result.forEach(r => logger.info(r));
-          
-          // 执行家庭任务
-          const { result: familyResult, totalBonusSpace, summary } = await doFamilyTask(cloudClient);
-          familyResult.forEach(r => logger.info(r));
-          if (totalBonusSpace > 0) {
-            logger.info(summary);
-          }
-          
-          totalBonusSpaceAllAccounts += totalBonusSpace;
-
-          // 获取容量信息
-          const { cloudCapacityInfo, familyCapacityInfo } = await cloudClient.getUserSizeInfo();
-          logger.info(
-            `个人总容量：${(cloudCapacityInfo.totalSize / 1024 / 1024 / 1024).toFixed(2)}G,` +
-            `家庭总容量：${(familyCapacityInfo.totalSize / 1024 / 1024 / 1024).toFixed(2)}G`
-          );
-          
-        } catch (e) {
-          logger.error(`账户 ${userNameInfo} 执行出错: ${e.message}`);
-          if (e.code === "ETIMEDOUT") {
-            throw e;
-          }
-        } finally {
-          logger.info(`账户 ${userNameInfo} 执行完毕\n`);
+  for (let index = 0; index < accounts.length; index += 1) {
+    const account = accounts[index];
+    const { userName, password } = account;
+    if (userName && password) {
+      const userNameInfo = mask(userName, 3, 7);
+      try {
+        logger.log(`账户 ${userNameInfo}开始执行`);
+        const cloudClient = new CloudClient(userName, password);
+        await cloudClient.login();
+        const result = await doTask(cloudClient);
+        result.forEach((r) => logger.log(r));
+        const familyResult = await doFamilyTask(cloudClient);
+        familyResult.forEach((r) => logger.log(r));
+        logger.log("任务执行完毕");
+        const { cloudCapacityInfo, familyCapacityInfo } =
+          await cloudClient.getUserSizeInfo();
+        logger.log(
+          `个人总容量：${(
+            cloudCapacityInfo.totalSize /
+            1024 /
+            1024 /
+            1024
+          ).toFixed(2)}G,家庭总容量：${(
+            familyCapacityInfo.totalSize /
+            1024 /
+            1024 /
+            1024
+          ).toFixed(2)}G`
+        );
+      } catch (e) {
+        logger.error(e);
+        if (e.code === "ETIMEDOUT") {
+          throw e;
         }
+      } finally {
+        logger.log(`账户 ${userNameInfo}执行完毕`);
       }
-    }));
+    }
   }
-
-  logger.info(`所有账号共获得空间：${totalBonusSpaceAllAccounts}M`);
 }
 
-// 程序入口
 (async () => {
   try {
     await main();
   } finally {
     const events = recording.replay();
-    const content = events
-      .map(e => e.data.join(""))
-      .join("\n");
+    const content = events.map((e) => `${e.data.join("")}`).join("  \n");
     push("天翼云盘自动签到任务", content);
     recording.erase();
   }
