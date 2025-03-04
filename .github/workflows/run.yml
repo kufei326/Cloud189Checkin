@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: user
     steps:
-      - name: 🔀 random delay 0-30 seconds
-        run: sleep $((RANDOM % 301))
+      - name: 🔀 random delay 0-60 seconds
+        run: sleep $((RANDOM % 61))
 
       - name: 🔌 Check out code
         uses: actions/checkout@main
